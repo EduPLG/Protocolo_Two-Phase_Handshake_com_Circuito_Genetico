@@ -3,18 +3,18 @@ from contextlib import contextmanager
 import logging
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("app.logger_functions")
 
 
-def setup_logger(name, level=logging.INFO):
+def setup_logger(name: str = "app", level=logging.INFO):
     """
     Configura um logger específico para a aplicação, evitando logs de bibliotecas.
 
-    :param name: O nome do logger a ser configurado (ex: __main__).
+    :param name: O nome do logger base da aplicação (ex: 'app').
     :param level: O nível de log (ex: logging.INFO).
     :return: A instância do logger configurado.
     """
-    app_logger = logging.getLogger(name)
+    app_logger = logging.getLogger(name)  # Logger principal da aplicação
     app_logger.setLevel(level)
 
     # Impede que as mensagens sejam passadas para o logger raiz, isolando-o.

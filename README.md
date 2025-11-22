@@ -28,7 +28,28 @@ Este repositório reúne o estudo e desenvolvimento de um modelo híbrido — di
    Otimização de taxas bioquímicas, como transcrição, degradação de RNA e afinidades de ligação.
 
 
-## Install requerements
+## Virtual enviroment
+
+- Criar um ambiente virtual
+```bash
+python -m venv venv --system-site-packages
 ```
+- Ativar o ambiente virtual
+```bash
+.\venv\Scripts\activate 
+```
+
+- Para desativar:
+```bash
+deactivate
+```
+
+## Install requerements
+
+```bash
 pip install -r requirements.txt
+```
+
+```bash
+pip install git+https://github.com/copasi/basico.git
 ```
