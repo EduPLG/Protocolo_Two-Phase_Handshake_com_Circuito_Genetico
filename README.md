@@ -6,25 +6,39 @@ Este repositório reúne o estudo e desenvolvimento de um modelo híbrido — di
 
 ## Etapas do Estudo
 
-1. **Modelagem Lógica Digital**  
+### 1. **Modelagem Lógica Digital**  (Apenas para visualização)
+
+
    Construção do modelo lógico de um circuito sequencial assíncrono utilizando portas C, buffers e o protocolo two-phase handshake, com diagramas, Logisim-evolution ou VHDL.
 
-2. **Tradução para Modelo Bioquímico**  
+### 2. **Tradução para Modelo Bioquímico**  (Apenas para visualização)
+
+
    Conversão do modelo digital para representações biológicas utilizando **SBOL** (padronização de componentes) e **CelloCAD** (síntese de circuitos genéticos digitais).
 
-3. **Implementação Bioquímica do Handshake**  
+### 3. **Implementação Bioquímica do Handshake**  (Apenas para visualização)
+
+
    Modelagem do liga/desliga de promotores controlados por RNAs regulatórios usando ferramentas como **COPASI**, **VCell** e **TinkerCell**.
 
-4. **Simulação de Redes Metabólicas e Regulatórias**  
+### 4. **Simulação de Redes Metabólicas e Regulatórias**
+
+
    Representação de RNAs como portadores de sinais lógicos, usando **SBML**, **BioNetGen**, **Tellurium** e **PySB** para simulação em Python.
 
-5. **Modelagem do Protocolo em Nível Bioquímico**  
+### 5. **Modelagem do Protocolo em Nível Bioquímico**
+
+
    Modelos baseados em ativação de promotores, transcrição de RNA e geração de sinais de *acknowledge*. Uso de **Petri Nets** (Snakes, PEP Tool) e **SBML2PN** para converter redes bioquímicas em redes de Petri.
 
-6. **Análise de Robustez**  
+### 6. **Análise de Robustez**
+
+
    Avaliação da sensibilidade do circuito a ruído molecular e variações temporais por meio de simulações determinísticas e estocásticas em **StochKit** e **COPASI**.
 
-7. **Ajuste de Parâmetros (Opcional)**  
+### 7. **Ajuste de Parâmetros (Opcional)**
+
+
    Otimização de taxas bioquímicas, como transcrição, degradação de RNA e afinidades de ligação.
 
 
