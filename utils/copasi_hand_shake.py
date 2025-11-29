@@ -1,10 +1,20 @@
 import basico
 import matplotlib.pyplot as plt
 import pandas as pd
+from os.path import join
 import logging
-from utils.logger_functions import _timed_debug, setup_logger
+from utils.logger_functions import _timed_debug, _timed
 
-logger = logging.getLogger("app.hand_shake")
+logger = logging.getLogger(__name__)
+
+MODELS = "models"
+
+# ----------------------------------------------------------------------
+# Etapa 3: Validação Cinética e Interoperabilidade (COPASI/SBML -> Tellurium)
+# Foco: Simulação Determinística para validar as constantes de taxa e
+# o comportamento do Handshake (Pulso e Reset) com base na estequiometria
+# bioquímica clássica.
+# ----------------------------------------------------------------------
 
 
 def generate_handshake_model():
@@ -69,6 +79,15 @@ def define_reactions():
             name="R5_Deg_G",
             scheme="G -> ",
             rate_law="k_deg * G"
+        )
+
+
+def save_model(file_dir: str = MODELS):
+    """ Salva o modelo COPASI atual no formato SBML no diretório especificado."""
+    with _timed(logger, f"Salvando modelo em {file_dir} | formato: SBML"):
+        basico.save_model(
+            join(file_dir, "two_phase_handshake_model.sbml"),
+            type="SBML"
         )
 
 

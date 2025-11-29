@@ -1,35 +1,35 @@
 import time
 from contextlib import contextmanager
 import logging
+import sys
 
 
-logger = logging.getLogger("app.logger_functions")
+logger = logging.getLogger(__name__)
 
 
-def setup_logger(name: str = "app", level=logging.INFO):
+def setup_logger(debug=False):
     """
-    Configura um logger específico para a aplicação, evitando logs de bibliotecas.
-
-    :param name: O nome do logger base da aplicação (ex: 'app').
-    :param level: O nível de log (ex: logging.INFO).
-    :return: A instância do logger configurado.
+    Configura o logging para a aplicação.
     """
-    app_logger = logging.getLogger(name)  # Logger principal da aplicação
-    app_logger.setLevel(level)
+    if debug:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
 
-    # Impede que as mensagens sejam passadas para o logger raiz, isolando-o.
-    app_logger.propagate = False
+    log_formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s: %(message)s", datefmt="%H:%M:%S"
+    )
 
-    # Adiciona um handler apenas se não houver nenhum, para evitar logs duplicados.
-    if not app_logger.handlers:
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        handler.setFormatter(formatter)
-        app_logger.addHandler(handler)
-    return app_logger
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(log_formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    root_logger.addHandler(handler)
 
 
 @contextmanager

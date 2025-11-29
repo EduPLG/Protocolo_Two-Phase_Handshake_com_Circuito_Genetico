@@ -42,7 +42,7 @@ Este repositório reúne o estudo e desenvolvimento de um modelo híbrido — di
    Otimização de taxas bioquímicas, como transcrição, degradação de RNA e afinidades de ligação.
 
 
-## Virtual enviroment
+## (Opcional) Virtual enviroment
 
 - Criar um ambiente virtual
 ```bash
@@ -64,6 +64,12 @@ deactivate
 pip install -r requirements.txt
 ```
 
-```bash
-pip install git+https://github.com/copasi/basico.git
-```
+## Motor BioNetGen:
+
+Para executar os scripts da Etapa 4, você precisa:
+
+- Configuração do BioNetGen (BNG)
+
+O PySB precisa do programa BioNetGen para funcionar. O BNG não é instalado via pip.
+
+Download: [Siga as instruções para o download via VS Code](https://bionetgen.readthedocs.io/en/latest/install.html)
