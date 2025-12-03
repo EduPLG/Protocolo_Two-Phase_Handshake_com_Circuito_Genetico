@@ -42,7 +42,7 @@ Este repositório reúne o estudo e desenvolvimento de um modelo híbrido — di
    Otimização de taxas bioquímicas, como transcrição, degradação de RNA e afinidades de ligação.
 
 
-## (Opcional) Virtual enviroment
+## (Opcional) Virtual enviroment Windowns
 
 - Criar um ambiente virtual
 ```bash
