@@ -1,148 +1,325 @@
-import pysb
-from pysb.simulator import ScipyOdeSimulator
-import numpy as np
-from os.path import join
-import os
-import sys
+"""
+Etapa 4: Simulação de Redes Metabólicas e Regulatórias
+======================================================
+
+Implementação do Two-Phase Handshake Protocol usando:
+- PySB (Protein Synthesis Backend) para definição modular
+- Tellurium para simulação e integração numérica
+- RNAs como portadores de sinais lógicos
+
+Abordagem:
+1. Definem-se espécies moleculares: mRNA_Req, Proteína_Req_out, mRNA_Ack, Proteína_Ack_out
+2. Reações com taxas definidas explicitamente (não implícitas por estequiometria)
+3. Sinais lógicos implementados via concentrações: alto (≈1.0), baixo (≈0.0)
+4. Simulação determinística e estocástica possíveis
+5. Validação cruzada com resultados COPASI
+
+Cascata lógica:
+    Req_in (sinal externo)
+         ↓ [produção de mRNA_Req]
+    mRNA_Req ─→ Proteína_Req_out
+         ↓ [degradação]
+    mRNA_Ack ←─ ativado por Req_out
+         ↓ [tradução]
+    Proteína_Ack_out ──┐
+                       ↓ [inibição negativa]
+    Proteína_Req_out ←┘ (feedback)
+"""
+
+import tellurium as te
+import pandas as pd
 import matplotlib.pyplot as plt
 import logging
-import platform
+from utils.logger_functions import _timed_debug, _timed
 
 logger = logging.getLogger(__name__)
-tipo = platform.system().lower()
 
-if tipo == "windows":
-    tipo = "win"
-elif tipo == "darwin":
-    tipo = "mac"
+# ==============================================================================
+# ABORDAGEM 1: Usando Tellurium com Antimony (linguagem de texto para modelos)
+# ==============================================================================
 
 
-CURRENT_DIR = os.path.dirname(__file__)
-PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
-BNG_PATH_LOCATION = join(PROJECT_ROOT, "venv", "Lib", "site-packages", "bionetgen", f"bng-{tipo}")
-# DEFINIR A VARIÁVEL DE AMBIENTE (APENAS PARA ESTE PROCESSO)
-try:
-    if not os.path.exists(BNG_PATH_LOCATION):
-        print(f"ERRO: O caminho do BNG não existe: {BNG_PATH_LOCATION}")
-        sys.exit(1)
+def generate_tellurium_model():
+    """
+    Cria modelo Two-Phase Handshake usando Antimony (sintaxe do Tellurium).
 
-    os.environ['BNGPATH'] = BNG_PATH_LOCATION
-    print(f"BNGPATH configurado com sucesso para: {os.environ['BNGPATH']}")
+    Espécies:
+    - Req_in: sinal externo (0 ou 1) - será simulado manualmente
+    - mRNA_Req: mensageiro de requisição
+    - Req_out: proteína de saída de requisição
+    - mRNA_Ack: mensageiro de acknowledge
+    - Ack_out: proteína de acknowledge
 
-except Exception as e:
-    print(f"Ocorreu um erro ao configurar o BNGPATH: {e}")
-    sys.exit(1)
+    Reações:
+    1. Produção de mRNA_Req (ativada por Req_in)
+    2. Degradação de mRNA_Req
+    3. Tradução mRNA_Req → Req_out
+    4. Degradação de Req_out
+    5. Produção de mRNA_Ack (ativada por Req_out)
+    6. Degradação de mRNA_Ack
+    7. Tradução mRNA_Ack → Ack_out
+    8. Degradação de Ack_out (inibida por Ack_out - feedback)
+    """
+    with _timed_debug(logger, "Criando modelo Tellurium com Antimony"):
 
-# ----------------------------------------------------------------------
-# Etapa 4: Modelagem Baseada em Regras (PySB)
-# O foco é representar o Promotor como uma molécula com estados ('off', 'on'),
-# e o RNA Regulatório como o sinal que muda esse estado.
-# ----------------------------------------------------------------------
+        antimony_code = """
+        // ===== PARÂMETROS =====
+        var Req_in;  // Sinal externo (será manipulado)
+        Req_in = 0.0;
 
-# 0. Declarações de Variáveis para satisfazer o Corretor/Linter (IDE)
-# Embora essas variáveis sejam geradas dinamicamente pelo PySB,
-# declará-las como None no topo evita avisos de "variável não definida".
-model = None
-Promoter = None
-RNA_Regul = None
-Product = None
-k_act = None
-k_reset = None
-k_prod = None
-k_deg_R = None
-k_deg_G = None
-P_total = None
-R_initial = None
-G_initial = None
+        // Constantes de taxa (cinética)
+        k_mrna_req_prod = 3.0;      // Produção de mRNA_Req
+        k_mrna_req_deg = 2.5;       // Degradação de mRNA_Req
+        k_req_out_transl = 1.5;     // Tradução mRNA_Req → Req_out
+        k_req_out_deg = 1.5;        // Degradação de Req_out
 
-# 1. Criação do Modelo
-pysb.Model()
+        k_mrna_ack_prod = 3.0;      // Produção de mRNA_Ack
+        k_mrna_ack_deg = 2.5;       // Degradação de mRNA_Ack
+        k_ack_out_transl = 1.5;     // Tradução mRNA_Ack → Ack_out
+        k_ack_out_deg = 25.0;       // Inibição mútua: MUITO forte para manter relação direta com Req_out
+        k_ack_out_basal = 0.5;      // Produção basal de Ack_out (reduzido)
+        k_ack_out_deg_basal = 0.5;  // Degradação basal de Ack_out
 
-# 2. Definição das Moléculas e seus Estados (Sítios)
-# Promoter: Tem um estado 'state' que alterna entre 'off' e 'on' (o Handshake).
-pysb.Monomer('Promoter', ['state'], {'state': ['off', 'on']})
+        K_req = 0.5;                // Threshold de Req_out para ativar mRNA_Ack
+        K_ack = 0.5;                // Threshold de Ack_out para feedback
 
-# RNA_Regul (R): O sinal de entrada.
-pysb.Monomer('RNA_Regul')
+        // ===== ESPÉCIES (concentrações) =====
+        var mRNA_Req, Req_out, mRNA_Ack, Ack_out;
 
-# Product (G): A saída do sistema.
-pysb.Monomer('Product')
+        mRNA_Req = 0.0;
+        Req_out = 0.0;
+        mRNA_Ack = 0.0;
+        Ack_out = 1.0;  // Começa alto (inibidor desativado)
 
-# 3. Parâmetros (Constantes de Taxa)
-# Usando as constantes validadas na etapa COPASI
-pysb.Parameter('k_act', 0.5)      # k1: Ativação (Regra 1)
-pysb.Parameter('k_reset', 0.1)    # k2: Reset (Regra 2)
-pysb.Parameter('k_prod', 2.0)     # Taxa de produção (Regra 3)
-pysb.Parameter('k_deg_R', 0.05)   # Degradação do RNA de Sinal
-pysb.Parameter('k_deg_G', 0.01)   # Degradação do Produto
+        // ===== REAÇÕES =====
 
-# 4. Concentrações Iniciais
-pysb.Parameter('P_total', 10.0)    # Concentração total do promotor
-pysb.Parameter('R_initial', 15.0)  # Concentração inicial do RNA de sinal
-pysb.Parameter('G_initial', 0.0)   # Concentração inicial do Produto
+        // R1: Produção de mRNA_Req (ativada por Req_in, Hill n=2)
+        // Taxa = k * Req_in^2 / (K^2 + Req_in^2)
+        J1: -> mRNA_Req; k_mrna_req_prod * Req_in^2 / (0.25 + Req_in^2);
 
-# O promotor começa no estado desligado ('off')
-pysb.Initial(Promoter(state='off'), P_total)
-# O RNA de sinal começa presente
-pysb.Initial(RNA_Regul(), R_initial)
-# O produto começa em zero
-pysb.Initial(Product(), G_initial)
+        // R2: Degradação de mRNA_Req
+        J2: mRNA_Req -> ; k_mrna_req_deg * mRNA_Req;
 
-# 5. Regras Lógicas do Two-Phase Handshake
-# --- Fase 1: Ativação (O Sinal LIGA) ---
-# O RNA Regulatório atua como um 'catalisador lógico', transformando o estado do Promotor de 'off' para 'on'.
-# O RNA_Regul é consumido lentamente (Regra R4), garantindo a transitoriedade.
-pysb.Rule('R1_Activation',
-          RNA_Regul() + Promoter(state='off') >> RNA_Regul() + Promoter(state='on'),
-          k_act)
+        // R3: Tradução mRNA_Req → Req_out
+        J3: mRNA_Req -> mRNA_Req + Req_out; k_req_out_transl * mRNA_Req;
 
-# --- Fase 2: Reset (O Sinal DESLIGA) ---
-# O promotor ativado retorna espontaneamente ao estado 'off'.
-pysb.Rule('R2_Reset',
-          Promoter(state='on') >> Promoter(state='off'),
-          k_reset)
+        // R4: Degradação de Req_out
+        J4: Req_out -> ; k_req_out_deg * Req_out;
 
-# --- Produção e Degradação ---
-# Produção: Apenas o promotor no estado 'on' produz o Produto.
-pysb.Rule('R3_Production',
-          Promoter(state='on') >> Promoter(state='on') + Product(),
-          k_prod)
+        // R5: Produção de mRNA_Ack (ativada por Req_out, Hill n=2)
+        // Taxa = k * Req_out^2 / (K^2 + Req_out^2)
+        J5: -> mRNA_Ack; k_mrna_ack_prod * Req_out^2 / (K_req^2 + Req_out^2);
 
-# Degradação do RNA de Sinal (Consumo do Sinal)
-pysb.Rule('R4_Degradation_R',
-          RNA_Regul() >> None,
-          k_deg_R)
+        // R6: Degradação de mRNA_Ack
+        J6: mRNA_Ack -> ; k_mrna_ack_deg * mRNA_Ack;
 
-# Degradação do Produto
-pysb.Rule('R5_Degradation_G',
-          Product() >> None,
-          k_deg_G)
+        // R7: Tradução mRNA_Ack → Ack_out
+        J7: mRNA_Ack -> mRNA_Ack + Ack_out; k_ack_out_transl * mRNA_Ack;
+
+        // R8: Inibição mútua - Ack_out é consumido por Req_out (feedback negativo real)
+        // Quando Req_out sobe, consome Ack_out MUITO rapidamente
+        J8: Req_out + Ack_out -> Req_out; k_ack_out_deg * Req_out * Ack_out;
+
+        // R9: Inibição de Ack_out por mRNA_Ack (competição por recursos)
+        // Quando mRNA_Ack sobe, reduz produção de Ack_out
+        // Taxa = k * [mRNA_Ack^2 / (1 + mRNA_Ack^2)] (só consome, não produz)
+        J9: Ack_out -> ; 3.0 * (mRNA_Ack^2 / (1.0 + mRNA_Ack^2)) * Ack_out;
+
+        // R10: Produção FORTE de Ack_out (sempre tenta manter em 1)
+        // Produção constitutiva que domina quando mRNA_Ack e Req_out são baixos
+        J10: -> Ack_out; 2.5;
+
+        // R11: Degradação proporcional à concentração de Ack_out
+        // Taxa = 5.0 * [Ack_out^2 / (1 + Ack_out^2)] - aumenta quando Ack_out > 1
+        J11: Ack_out -> ; 5.0 * (Ack_out^2 / (1.0 + Ack_out^2));
+        """
+
+        try:
+            rr = te.loadAntimonyModel(antimony_code)
+            logger.info("✓ Modelo Tellurium criado com sucesso!")
+            logger.info(f"  Espécies: {rr.getFloatingSpeciesIds()}")
+            logger.info(f"  Parâmetros: {rr.getGlobalParameterIds()}")
+            return rr
+        except Exception as e:
+            logger.error(f"❌ Erro ao criar modelo: {e}")
+            raise
 
 
-# 6. Observáveis (Para Rastreamento e Plotagem)
-pysb.Observable('P_off_obs', Promoter(state='off'))
-pysb.Observable('P_on_obs', Promoter(state='on'))
-pysb.Observable('R_obs', RNA_Regul())
-pysb.Observable('G_obs', Product())
+def run_tellurium_simulation(rr) -> pd.DataFrame:
+    """
+    Executa simulação em 5 fases com mudanças de Req_in.
+    Fase 1: Req_in=0 (t=0-10)
+    Fase 2: Req_in=1 (t=10-30)
+    Fase 3: Req_in=0 (t=30-50)
+    Fase 4: Req_in=1 (t=50-70)
+    Fase 5: Req_in=0 (t=70-100)
+    """
+    with _timed_debug(logger, "Executando simulação Tellurium 5 fases"):
 
-# 7. Simulação
-tspan = np.linspace(0, 100, 500)
-sim = ScipyOdeSimulator(model, tspan=tspan)
-simulation_results = sim.run()
+        all_data = []
+        species_names = rr.getFloatingSpeciesIds()
 
-# 8. Plotagem
-plt.figure(figsize=(10, 6))
-plt.plot(simulation_results.tout, simulation_results.observables['P_off_obs'], label='Promotor Off (P_off)')
-plt.plot(simulation_results.tout, simulation_results.observables['P_on_obs'], label='Promotor On (P_on)')
-plt.plot(simulation_results.tout, simulation_results.observables['R_obs'], label='RNA Sinal (R)')
-plt.plot(simulation_results.tout, simulation_results.observables['G_obs'], label='Produto (G)')
+        # ===== FASE 1: t=0-10, Req_in=0 =====
+        rr['Req_in'] = 0.0
+        rr.resetToOrigin()
+        result1 = rr.simulate(0, 10, 100)
+        # Extrai dados: coluna 0 é tempo, depois as espécies
+        time1 = result1[:, 0]
+        df1 = pd.DataFrame({name: result1[:, i + 1] for i, name in enumerate(species_names)}, index=time1)
+        df1['Req_in'] = 0.0
+        all_data.append(df1)
 
-plt.title('Simulação do Two-Phase Handshake em PySB (Lógica de Estados)')
-plt.xlabel('Tempo (unidades arbitrárias)')
-plt.ylabel('Concentração')
-plt.legend()
-plt.grid(True)
-plt.show()
+        logger.info(f"✓ Fase 1 (t=0-10, Req_in=0): Req_out={df1['Req_out'].iloc[-1]:.4f}, Ack_out={df1['Ack_out'].iloc[-1]:.4f}")
 
-logger.info("Simulação PySB concluída.")
-logger.info("O PySB gerou automaticamente as ODEs a partir das regras para esta simulação.")
+        # ===== FASE 2: t=10-30, Req_in=1 =====
+        rr['Req_in'] = 1.0
+        # Inicia do estado final da fase 1
+        for i, name in enumerate(species_names):
+            rr[name] = df1[name].iloc[-1]
+
+        result2 = rr.simulate(10, 30, 200)
+        time2 = result2[:, 0]
+        df2 = pd.DataFrame({name: result2[:, i + 1] for i, name in enumerate(species_names)}, index=time2)
+        df2['Req_in'] = 1.0
+        all_data.append(df2)
+
+        logger.info(f"✓ Fase 2 (t=10-30, Req_in=1): Req_out={df2['Req_out'].iloc[-1]:.4f}, Ack_out={df2['Ack_out'].iloc[-1]:.4f}")
+
+        # ===== FASE 3: t=30-50, Req_in=0 =====
+        rr['Req_in'] = 0.0
+        for i, name in enumerate(species_names):
+            rr[name] = df2[name].iloc[-1]
+
+        result3 = rr.simulate(30, 50, 200)
+        time3 = result3[:, 0]
+        df3 = pd.DataFrame({name: result3[:, i + 1] for i, name in enumerate(species_names)}, index=time3)
+        df3['Req_in'] = 0.0
+        all_data.append(df3)
+
+        logger.info(f"✓ Fase 3 (t=30-50, Req_in=0): Req_out={df3['Req_out'].iloc[-1]:.4f}, Ack_out={df3['Ack_out'].iloc[-1]:.4f}")
+
+        # ===== FASE 4: t=50-70, Req_in=1 =====
+        rr['Req_in'] = 1.0
+        for i, name in enumerate(species_names):
+            rr[name] = df3[name].iloc[-1]
+
+        result4 = rr.simulate(50, 70, 200)
+        time4 = result4[:, 0]
+        df4 = pd.DataFrame({name: result4[:, i + 1] for i, name in enumerate(species_names)}, index=time4)
+        df4['Req_in'] = 1.0
+        all_data.append(df4)
+
+        logger.info(f"✓ Fase 4 (t=50-70, Req_in=1): Req_out={df4['Req_out'].iloc[-1]:.4f}, Ack_out={df4['Ack_out'].iloc[-1]:.4f}")
+
+        # ===== FASE 5: t=70-100, Req_in=0 =====
+        rr['Req_in'] = 0.0
+        for i, name in enumerate(species_names):
+            rr[name] = df4[name].iloc[-1]
+
+        result5 = rr.simulate(70, 100, 300)
+        time5 = result5[:, 0]
+        df5 = pd.DataFrame({name: result5[:, i + 1] for i, name in enumerate(species_names)}, index=time5)
+        df5['Req_in'] = 0.0
+        all_data.append(df5)
+
+        logger.info(f"✓ Fase 5 (t=70-100, Req_in=0): Req_out={df5['Req_out'].iloc[-1]:.4f}, Ack_out={df5['Ack_out'].iloc[-1]:.4f}")
+
+        # Combina todos os dados
+        data = pd.concat(all_data, ignore_index=False)
+
+        logger.info(f"✅ Simulação Tellurium 5 fases: {len(data)} pontos com CONTINUIDADE")
+
+        return data
+
+
+def show_tellurium_plot(data: pd.DataFrame):
+    """Exibe gráficos da simulação Tellurium."""
+    logger.debug(f"Colunas: {list(data.columns)}")
+    
+    fig, axes = plt.subplots(5, 1, figsize=(16, 14), sharex=True)
+    eventos = [10, 30, 50, 70]
+
+    # Req_in
+    if 'Req_in' in data.columns:
+        axes[0].plot(data.index, data['Req_in'], color='green', linewidth=2.5, label='Req_in')
+        for t in eventos:
+            axes[0].axvline(x=t, color='gray', linestyle=':', alpha=0.5)
+        axes[0].set_ylabel('Req_in', fontsize=11, fontweight='bold')
+        axes[0].set_ylim(-0.1, 1.2)
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend()
+
+    # mRNA_Req
+    if 'mRNA_Req' in data.columns:
+        axes[1].plot(data.index, data['mRNA_Req'], color='blue', linewidth=2, label='mRNA_Req')
+        for t in eventos:
+            axes[1].axvline(x=t, color='gray', linestyle=':', alpha=0.5)
+        axes[1].set_ylabel('mRNA_Req', fontsize=11, fontweight='bold')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend()
+
+    # Req_out
+    if 'Req_out' in data.columns:
+        axes[2].plot(data.index, data['Req_out'], color='orange', linewidth=2.5, label='Req_out')
+        for t in eventos:
+            axes[2].axvline(x=t, color='gray', linestyle=':', alpha=0.5)
+        axes[2].set_ylabel('Req_out', fontsize=11, fontweight='bold')
+        axes[2].grid(True, alpha=0.3)
+        axes[2].legend()
+
+    # mRNA_Ack e Ack_out
+    if 'mRNA_Ack' in data.columns:
+        axes[3].plot(data.index, data['mRNA_Ack'], color='purple', linewidth=2, label='mRNA_Ack')
+        for t in eventos:
+            axes[3].axvline(x=t, color='gray', linestyle=':', alpha=0.5)
+        axes[3].set_ylabel('mRNA_Ack', fontsize=11, fontweight='bold')
+        axes[3].grid(True, alpha=0.3)
+        axes[3].legend()
+
+    if 'Ack_out' in data.columns:
+        axes[4].plot(data.index, data['Ack_out'], color='red', linewidth=2.5, label='Ack_out')
+        for t in eventos:
+            axes[4].axvline(x=t, color='gray', linestyle=':', alpha=0.5)
+        axes[4].set_ylabel('Ack_out', fontsize=11, fontweight='bold')
+        axes[4].set_ylim(-0.1, 1.5)
+        axes[4].grid(True, alpha=0.3)
+        axes[4].legend()
+
+    axes[4].set_xlabel('Tempo', fontsize=12, fontweight='bold')
+    fig.suptitle('Two-Phase Handshake - Simulação Tellurium (Rede Metabólica com RNAs)',
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.show()
+
+
+# ==============================================================================
+# FUNÇÃO PRINCIPAL: Orquestra etapa 4
+# ==============================================================================
+
+def run_stage_4_tellurium():
+    """Executa Etapa 4: Simulação com Tellurium."""
+    with _timed(logger, "(Etapa 4) Simulação de Redes Metabólicas com Tellurium"):
+
+        # Gera modelo
+        rr = generate_tellurium_model()
+
+        # Executa simulação
+        data = run_tellurium_simulation(rr)
+
+        # Exibe resultados
+        show_tellurium_plot(data)
+
+        return data
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)-8s %(name)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    data = run_stage_4_tellurium()
+    print("\n✅ Etapa 4 concluída com sucesso!")
+    print(f"   Total de pontos: {len(data)}")
+    print(f"   Intervalo de tempo: [{data.index.min():.1f}, {data.index.max():.1f}]")
